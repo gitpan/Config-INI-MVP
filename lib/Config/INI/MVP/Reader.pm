@@ -4,17 +4,19 @@ use warnings;
 package Config::INI::MVP::Reader;
 use base qw(Config::INI::Reader);
 
+use Config::MVP::Assembler;
+
 =head1 NAME
 
 Config::INI::MVP::Reader - multi-value capable .ini file reader (for plugins)
 
 =head1 VERSION
 
-version 0.019
+version 0.021
 
 =cut
 
-our $VERSION = '0.019';
+our $VERSION = '0.021';
 
 =head1 DESCRIPTION
 
@@ -60,103 +62,54 @@ any section header.  By default, it will have the name C<_> and no package.
 
 =head1 METHODS
 
-=head2 multivalue_args
-
-This method returns a list of property names which may have multiple entries in
-the root section.
-
 =cut
+
+sub _mvp { $_[0]->{'Config::INI::MVP::Reader'}{mvp} }
+
+sub multivalue_args { [] }
 
 sub new {
   my ($class) = @_;
+  my $self = $class->SUPER::new;
 
-  my $self = bless { } => $class;
-
-  $self->{__PACKAGE__} = {
-    mva    => { $self->starting_section => [ $self->multivalue_args ] },
-    order  => [ $self->starting_section ],
-    # plugin => { $self->starting_section => { } },
-  };
+  $self->{'Config::INI::MVP::Reader'}{mvp} = Config::MVP::Assembler->new({
+    starting_section_multivalue_args => $self->multivalue_args,
+  });
 
   return $self;
 }
-
-sub multivalue_args { }
-
-sub starting_section { q{_} }
-
-sub _expand_package { $_[1] }
 
 sub change_section {
   my ($self, $section) = @_;
 
   my ($package, $name) = $section =~ m{\A\s*(?:([^/\s]+)\s*/\s*)?(\S+)\z};
   $package = $name unless defined $package and length $package;
-  
-  Carp::croak qq{couldn't understand section header: "$section"}
+    
+  Carp::croak qq{couldn't understand section header: "$_[1]"}
     unless $package;
 
-  $package = $self->_expand_package($package);
-
-  # Consider using Params::Util to validate class name.  -- rjbs, 2007-05-11
-  Carp::croak "invalid package name '$package' in configuration"
-    unless $package =~ /\A[A-Z0-9]+(?:::[A-Z0-9]+)*\z/i;
-  
-  Carp::croak qq{multiple sections found for plugin "$name"}
-    if $self->{__PACKAGE__}{plugin}{$name};
-
-  my $plugin = $self->{__PACKAGE__}{plugin}{$name} = {
-    '=package' => $package
-  };
-
-  push @{ $self->{__PACKAGE__}{order} }, $name;
-  $self->{section} = $name;
-
-  # We already inspected this plugin.
-  return if $self->{__PACKAGE__}{mva}{$package};
-
-  eval "require $package; 1"
-    or Carp::croak "couldn't load plugin $section given in config: $@";
-
-  if ($package->can('multivalue_args')) {
-    $self->{__PACKAGE__}{mva}{$package} = [ $package->multivalue_args ];
-  } else {
-    $self->{__PACKAGE__}{mva}{$package} = [ ];
-  }
-}
-
-sub set_value {
-  my ($self, $name, $value) = @_;
-
-  my $sec_name = $self->current_section;
-  my $section = $self->{__PACKAGE__}{plugin}{ $sec_name } ||= {};
-
-  my $mva = $sec_name eq $self->starting_section
-          ? $self->{__PACKAGE__}{mva}{ $sec_name}
-          : $self->{__PACKAGE__}{mva}{ $section->{'=package'} };
-
-  if (grep { $_ eq $name } @$mva) {
-    $section->{$name} ||= [];
-    push @{ $section->{$name} }, $value;
-    return;
-  }
-
-  if (exists $section->{$name}) {
-    Carp::croak "multiple values given for property $name in section $sec_name";
-  }
-
-  $section->{$name} = $value;
+  $self->_mvp->change_section($package, $name);
 }
 
 sub finalize {
   my ($self) = @_;
 
-  my $data = $self->{data} = [ ];
-  for my $name (@{ $self->{__PACKAGE__}{order} }) {
-    my $plugin = $self->{__PACKAGE__}{plugin}{$name};
-    $plugin->{'=name'} = $name;
-    push @$data, $plugin;
+  my @sections;
+
+  for my $section ($self->_mvp->sequence->sections) {
+    push @sections, {
+      %{ $section->payload },
+      '=name' => $section->name,
+      ($section->package ? ('=package' => $section->package) : ()),
+    };
   }
+
+  $self->{data} = \@sections;
+}
+
+sub set_value {
+  my ($self, $name, $value) = @_;
+  $self->_mvp->set_value($name, $value);
 }
 
 =head1 AUTHOR
