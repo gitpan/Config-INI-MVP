@@ -21,8 +21,9 @@ no_index:
     - xt
 requires:
   Config::INI::Reader: 0
-  Config::MVP: 0
+  Config::MVP: 0.092060
+  Moose: 0
 resources:
   license: http://dev.perl.org/licenses/
   repository: http://github.com/rjbs/config-ini-mvp
-version: 0.021
+version: 0.022

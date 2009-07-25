@@ -1,8 +1,9 @@
-use strict;
-use warnings;
-
 package Config::INI::MVP::Reader;
-use base qw(Config::INI::Reader);
+use Moose;
+
+use Config::INI::Reader;
+BEGIN { our @ISA; push @ISA, 'Config::INI::Reader' }
+sub new { goto &Moose::Object::new }
 
 use Config::MVP::Assembler;
 
@@ -12,11 +13,11 @@ Config::INI::MVP::Reader - multi-value capable .ini file reader (for plugins)
 
 =head1 VERSION
 
-version 0.021
+version 0.022
 
 =cut
 
-our $VERSION = '0.021';
+our $VERSION = '0.022';
 
 =head1 DESCRIPTION
 
@@ -31,11 +32,11 @@ following file:
   y = 3
 
 MVP will, upon reaching this section, load Foo::Bar and call a method (by
-default C<multivalue_args>) on it, to determine which property names may have
-multiple entries.  If the return value of that method includes C<y>, then the
-entry for C<y> in the Foo::Bar section will be an arrayref with two values.  If
-the list returned by C<multivalue_args> did not contain C<y>, then an exception
-would be raised while reading this section.
+default C<mvp_multivalue_args>) on it, to determine which property names may
+have multiple entries.  If the return value of that method includes C<y>, then
+the entry for C<y> in the Foo::Bar section will be an arrayref with two values.
+If the list returned by C<multivalue_args> did not contain C<y>, then an
+exception would be raised while reading this section.
 
 To request a single plugin multiple times, the sections must be uniquely
 identifiable by their names.  A name can be given in this form:
@@ -64,20 +65,39 @@ any section header.  By default, it will have the name C<_> and no package.
 
 =cut
 
-sub _mvp { $_[0]->{'Config::INI::MVP::Reader'}{mvp} }
+has assembler => (
+  is   => 'ro',
+  isa  => 'Config::MVP::Assembler',
+  default => sub {
+    my ($self) = @_;
+    my $assembler = $self->assembler_class->new;
 
-sub multivalue_args { [] }
+    my $starting_section = $assembler->section_class->new({
+      name    => $self->starting_section_name,
+      aliases => $self->starting_section_aliases,
+      multivalue_args => $self->starting_section_multivalue_args,
+    });
 
-sub new {
-  my ($class) = @_;
-  my $self = $class->SUPER::new;
+    $assembler->sequence->add_section($starting_section);
 
-  $self->{'Config::INI::MVP::Reader'}{mvp} = Config::MVP::Assembler->new({
-    starting_section_multivalue_args => $self->multivalue_args,
-  });
+    return $assembler;
+  },
+);
 
-  return $self;
-}
+has assembler_class => (
+  is   => 'ro',
+  isa  => 'ClassName',
+  lazy => 1,
+  builder => 'default_assembler_class',
+);
+
+sub default_assembler_class { 'Config::MVP::Assembler' }
+
+# XXX: These should be attributes with builders and blah blah blah, but I just
+# can't be bothered. -- rjbs, 2009-07-24
+sub starting_section_name    { $_[0]->starting_section }
+sub starting_section_aliases { {} }
+sub starting_section_multivalue_args { [] }
 
 sub change_section {
   my ($self, $section) = @_;
@@ -88,7 +108,7 @@ sub change_section {
   Carp::croak qq{couldn't understand section header: "$_[1]"}
     unless $package;
 
-  $self->_mvp->change_section($package, $name);
+  $self->assembler->change_section($package, $name);
 }
 
 sub finalize {
@@ -96,7 +116,7 @@ sub finalize {
 
   my @sections;
 
-  for my $section ($self->_mvp->sequence->sections) {
+  for my $section ($self->assembler->sequence->sections) {
     push @sections, {
       %{ $section->payload },
       '=name' => $section->name,
@@ -109,7 +129,7 @@ sub finalize {
 
 sub set_value {
   my ($self, $name, $value) = @_;
-  $self->_mvp->set_value($name, $value);
+  $self->assembler->add_value($name, $value);
 }
 
 =head1 AUTHOR
