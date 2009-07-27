@@ -22,8 +22,8 @@ no_index:
 requires:
   Config::INI::Reader: 0
   Config::MVP: 0.092060
-  Moose: 0
+  Moose: 0.65
 resources:
   license: http://dev.perl.org/licenses/
   repository: http://github.com/rjbs/config-ini-mvp
-version: 0.022
+version: 0.023
